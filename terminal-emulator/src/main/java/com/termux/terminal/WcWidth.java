@@ -511,7 +511,17 @@ public final class WcWidth {
     }
 
     /** Return the terminal display width of a code point: 0, 1 || 2. */
+    public static boolean isIndicConsonant(int ucs) {
+        return (ucs >= 0x0C95 && ucs <= 0x0CB9) || ucs == 0x0CDE ||
+               (ucs >= 0x0915 && ucs <= 0x0939) || (ucs >= 0x0958 && ucs <= 0x095F);
+    }
+
     public static int width(int ucs) {
+        if ((ucs >= 0x0C81 && ucs <= 0x0C83) || ucs == 0x0CBC ||
+            (ucs >= 0x0CBE && ucs <= 0x0CD6) || (ucs >= 0x0CE2 && ucs <= 0x0CE3) ||
+            (ucs >= 0x0901 && ucs <= 0x0903) || (ucs >= 0x093A && ucs <= 0x094F) ||
+            (ucs >= 0x0951 && ucs <= 0x0957) || (ucs >= 0x0962 && ucs <= 0x0963) ||
+            ucs == 0x200C || ucs == 0x200D) return 0;
         if (ucs == 0 ||
             ucs == 0x034F ||
             (0x200B <= ucs && ucs <= 0x200F) ||

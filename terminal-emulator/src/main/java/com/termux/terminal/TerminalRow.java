@@ -91,39 +91,37 @@ public final class TerminalRow {
     }
 
     /** Note that the column may end of second half of wide character. */
+    private boolean isCombiningAt(int i) {
+        if (Character.isHighSurrogate(mText[i])) return WcWidth.width(Character.toCodePoint(mText[i], mText[i+1])) <= 0;
+        char c = mText[i];
+        if (WcWidth.width(c) <= 0) return true;
+        return i > 0 && (mText[i-1] == 0x0CCD || mText[i-1] == 0x094D) && WcWidth.isIndicConsonant(c);
+    }
+    public boolean columnEndsWithVirama(int col) {
+        if (col < 0 || col >= mColumns) return false;
+        int a = findStartOfColumn(col);
+        int b = (col + 1 < mColumns) ? findStartOfColumn(col + 1) : mSpaceUsed;
+        return b > a && (mText[b - 1] == 0x0CCD || mText[b - 1] == 0x094D);
+    }
     public int findStartOfColumn(int column) {
         if (column == mColumns) return getSpaceUsed();
 
         int currentColumn = 0;
         int currentCharIndex = 0;
-        while (true) { // 0<2 1 < 2
+        while (true) {
             int newCharIndex = currentCharIndex;
-            char c = mText[newCharIndex++]; // cci=1, cci=2
-            boolean isHigh = Character.isHighSurrogate(c);
-            int codePoint = isHigh ? Character.toCodePoint(c, mText[newCharIndex++]) : c;
-            int wcwidth = WcWidth.width(codePoint); // 1, 2
+            boolean comb = isCombiningAt(currentCharIndex);
+            char c = mText[newCharIndex++];
+            int codePoint = Character.isHighSurrogate(c) ? Character.toCodePoint(c, mText[newCharIndex++]) : c;
+            int wcwidth = comb ? 0 : WcWidth.width(codePoint);
             if (wcwidth > 0) {
                 currentColumn += wcwidth;
                 if (currentColumn == column) {
-                    while (newCharIndex < mSpaceUsed) {
-                        // Skip combining chars.
-                        if (Character.isHighSurrogate(mText[newCharIndex])) {
-                            if (WcWidth.width(Character.toCodePoint(mText[newCharIndex], mText[newCharIndex + 1])) <= 0) {
-                                newCharIndex += 2;
-                            } else {
-                                break;
-                            }
-                        } else if (WcWidth.width(mText[newCharIndex]) <= 0) {
-                            newCharIndex++;
-                        } else {
-                            break;
-                        }
+                    while (newCharIndex < mSpaceUsed && isCombiningAt(newCharIndex)) {
+                        newCharIndex += Character.isHighSurrogate(mText[newCharIndex]) ? 2 : 1;
                     }
                     return newCharIndex;
-                } else if (currentColumn > column) {
-                    // Wide column going past end.
-                    return currentCharIndex;
-                }
+                } else if (currentColumn > column) return currentCharIndex;
             }
             currentCharIndex = newCharIndex;
         }
@@ -133,7 +131,8 @@ public final class TerminalRow {
         for (int currentCharIndex = 0, currentColumn = 0; currentCharIndex < mSpaceUsed; ) {
             char c = mText[currentCharIndex++];
             int codePoint = Character.isHighSurrogate(c) ? Character.toCodePoint(c, mText[currentCharIndex++]) : c;
-            int wcwidth = WcWidth.width(codePoint);
+            boolean v = (currentCharIndex >= 2 && !Character.isHighSurrogate(c) && (mText[currentCharIndex-2] == 0x0CCD || mText[currentCharIndex-2] == 0x094D) && WcWidth.isIndicConsonant(codePoint));
+            int wcwidth = v ? 0 : WcWidth.width(codePoint);
             if (wcwidth > 0) {
                 if (currentColumn == column && wcwidth == 2) return true;
                 currentColumn += wcwidth;
@@ -162,7 +161,8 @@ public final class TerminalRow {
             mHasTerminalBitmap = true;
         }
 
-        final int newCodePointDisplayWidth = WcWidth.width(codePoint);
+        final boolean conj = WcWidth.isIndicConsonant(codePoint) && columnEndsWithVirama(columnToSet);
+        final int newCodePointDisplayWidth = conj ? 0 : WcWidth.width(codePoint);
 
         // Fast path when we don't have any chars with width != 1
         if (!mHasNonOneWidthOrSurrogateChars) {

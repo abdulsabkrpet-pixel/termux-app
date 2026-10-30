@@ -132,7 +132,7 @@ public final class TerminalRenderer {
                 // If this is detected, we draw this code point scaled to match what wcwidth() expects.
                 final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
                     currentCharIndex, charsForCodePoint);
-                final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
+                final boolean fontWidthMismatch = false;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
                     if (column == 0 || column == lastRunStartColumn) {
@@ -160,9 +160,7 @@ public final class TerminalRenderer {
                 measuredWidthForRun += measuredCodePointWidth;
                 column += codePointWcWidth;
                 currentCharIndex += charsForCodePoint;
-                while (currentCharIndex < charsUsedInLine && WcWidth.width(line, currentCharIndex) <= 0) {
-                    // Eat combining chars so that they are treated as part of the last non-combining code point,
-                    // instead of e.g. being considered inside the cursor in the next run.
+                while (currentCharIndex < charsUsedInLine && (WcWidth.width(line, currentCharIndex) <= 0 || (currentCharIndex > 0 && (line[currentCharIndex-1] == 0x0CCD || line[currentCharIndex-1] == 0x094D) && WcWidth.isIndicConsonant(line[currentCharIndex])))) {
                     currentCharIndex += Character.isHighSurrogate(line[currentCharIndex]) ? 2 : 1;
                 }
             }
@@ -214,7 +212,8 @@ public final class TerminalRenderer {
 
         mes = mes / mFontWidth;
         boolean savedMatrix = false;
-        if (Math.abs(mes - runWidthColumns) > 0.01) {
+        boolean ind = false; for (int k = startCharIndex; k < startCharIndex + runWidthChars; k++) { if (text[k] >= 0x0900 && text[k] <= 0x0DFF) { ind = true; break; } }
+        if (!ind && Math.abs(mes - runWidthColumns) > 0.01) {
             canvas.save();
             canvas.scale(runWidthColumns / mes, 1.f);
             left *= mes / runWidthColumns;

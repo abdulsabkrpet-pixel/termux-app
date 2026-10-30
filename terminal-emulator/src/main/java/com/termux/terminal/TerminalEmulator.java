@@ -3391,7 +3391,9 @@ public final class TerminalEmulator {
         }
 
         final boolean autoWrap = isDecsetInternalBitSet(DECSET_BIT_AUTOWRAP);
-        final int displayWidth = WcWidth.width(codePoint);
+        int pCol = (mCursorCol > 0 && !mAboutToAutoWrap) ? (mCursorCol - 1) : mCursorCol;
+        boolean conj = WcWidth.isIndicConsonant(codePoint) && mScreen.allocateFullLineIfNecessary(mScreen.externalToInternalRow(mCursorRow)).columnEndsWithVirama(pCol);
+        final int displayWidth = conj ? 0 : WcWidth.width(codePoint);
         final boolean cursorInLastColumn = mCursorCol == mRightMargin - 1;
 
         if (autoWrap) {

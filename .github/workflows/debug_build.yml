@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - master
+      - kannada-patch
       - 'github-releases/**'
   pull_request:
     branches:
       - master
+      - kannada-patch
 
 jobs:
   build:
