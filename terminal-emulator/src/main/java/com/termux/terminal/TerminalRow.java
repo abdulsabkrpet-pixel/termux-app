@@ -76,13 +76,16 @@ public final class TerminalRow {
                 codePoint = ' ';
                 startingFromSecondHalfOfWideChar = false;
             }
-            int w = WcWidth.width(codePoint);
+            boolean isConjunct = (i > x1 && !Character.isHighSurrogate(sourceChar) && (sourceChars[i - 1] == 0x0CCD || sourceChars[i - 1] == 0x094D) && WcWidth.isIndicConsonant(codePoint));
+            int w = isConjunct ? 0 : WcWidth.width(codePoint);
             if (w > 0) {
                 destinationX += latestNonCombiningWidth;
                 sourceX1 += latestNonCombiningWidth;
                 latestNonCombiningWidth = w;
             }
-            setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            if (destinationX < mColumns && sourceX1 < line.mColumns) {
+                setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            }
         }
     }
 
@@ -284,6 +287,8 @@ public final class TerminalRow {
     }
 
     public final long getStyle(int column) {
+        if (column < 0) column = 0;
+        if (column >= mStyle.length) column = mStyle.length - 1;
         return mStyle[column];
     }
 
