@@ -95,45 +95,52 @@ public final class TerminalRow {
 
     /** Note that the column may end of second half of wide character. */
     private boolean isCombiningAt(int i) {
-        if (Character.isHighSurrogate(mText[i])) return WcWidth.width(Character.toCodePoint(mText[i], mText[i+1])) <= 0;
+        if (i < 0 || i >= mSpaceUsed) return false;
+        if (Character.isHighSurrogate(mText[i])) {
+            return (i + 1 < mSpaceUsed) && WcWidth.width(Character.toCodePoint(mText[i], mText[i + 1])) <= 0;
+        }
         char c = mText[i];
         if (WcWidth.width(c) <= 0) return true;
-        return i > 0 && (mText[i-1] == 0x0CCD || mText[i-1] == 0x094D) && WcWidth.isIndicConsonant(c);
+        return i > 0 && (mText[i - 1] == 0x0CCD || mText[i - 1] == 0x094D) && WcWidth.isIndicConsonant(c);
     }
     public boolean columnEndsWithVirama(int col) {
         if (col < 0 || col >= mColumns) return false;
         int a = findStartOfColumn(col);
         int b = (col + 1 < mColumns) ? findStartOfColumn(col + 1) : mSpaceUsed;
-        return b > a && (mText[b - 1] == 0x0CCD || mText[b - 1] == 0x094D);
+        return b > a && b <= mSpaceUsed && (mText[b - 1] == 0x0CCD || mText[b - 1] == 0x094D);
     }
     public int findStartOfColumn(int column) {
-        if (column == mColumns) return getSpaceUsed();
+        if (column <= 0) return 0;
+        if (column >= mColumns) return getSpaceUsed();
 
         int currentColumn = 0;
         int currentCharIndex = 0;
-        while (true) {
+        while (currentCharIndex < mSpaceUsed) {
             int newCharIndex = currentCharIndex;
             boolean comb = isCombiningAt(currentCharIndex);
             char c = mText[newCharIndex++];
-            int codePoint = Character.isHighSurrogate(c) ? Character.toCodePoint(c, mText[newCharIndex++]) : c;
+            int codePoint = (Character.isHighSurrogate(c) && newCharIndex < mSpaceUsed)
+                    ? Character.toCodePoint(c, mText[newCharIndex++]) : c;
             int wcwidth = comb ? 0 : WcWidth.width(codePoint);
             if (wcwidth > 0) {
                 currentColumn += wcwidth;
                 if (currentColumn == column) {
                     while (newCharIndex < mSpaceUsed && isCombiningAt(newCharIndex)) {
-                        newCharIndex += Character.isHighSurrogate(mText[newCharIndex]) ? 2 : 1;
+                        newCharIndex += (Character.isHighSurrogate(mText[newCharIndex]) && newCharIndex + 1 < mSpaceUsed) ? 2 : 1;
                     }
                     return newCharIndex;
                 } else if (currentColumn > column) return currentCharIndex;
             }
             currentCharIndex = newCharIndex;
         }
+        return mSpaceUsed;
     }
 
     private boolean wideDisplayCharacterStartingAt(int column) {
         for (int currentCharIndex = 0, currentColumn = 0; currentCharIndex < mSpaceUsed; ) {
             char c = mText[currentCharIndex++];
-            int codePoint = Character.isHighSurrogate(c) ? Character.toCodePoint(c, mText[currentCharIndex++]) : c;
+            int codePoint = (Character.isHighSurrogate(c) && currentCharIndex < mSpaceUsed)
+                    ? Character.toCodePoint(c, mText[currentCharIndex++]) : c;
             boolean v = (currentCharIndex >= 2 && !Character.isHighSurrogate(c) && (mText[currentCharIndex-2] == 0x0CCD || mText[currentCharIndex-2] == 0x094D) && WcWidth.isIndicConsonant(codePoint));
             int wcwidth = v ? 0 : WcWidth.width(codePoint);
             if (wcwidth > 0) {
@@ -190,11 +197,16 @@ public final class TerminalRow {
             // Check if we are overwriting the first half of a wide character starting at the next column:
             boolean overwritingWideCharInNextColumn = newCodePointDisplayWidth == 2 && wideDisplayCharacterStartingAt(columnToSet + 1);
             if (overwritingWideCharInNextColumn) setChar(columnToSet + 1, ' ', style);
+            // Prevent cross-column Indic conjunct merging when previous column ends with Virama:
+            if (columnToSet > 0 && WcWidth.isIndicConsonant(codePoint) && columnEndsWithVirama(columnToSet - 1)) {
+                setChar(columnToSet - 1, 0x200C, getStyle(columnToSet - 1));
+            }
         }
 
         char[] text = mText;
         final int oldStartOfColumnIndex = findStartOfColumn(columnToSet);
-        final int oldCodePointDisplayWidth = WcWidth.width(text, oldStartOfColumnIndex);
+        final int oldCodePointDisplayWidth = (oldStartOfColumnIndex < mSpaceUsed)
+                ? WcWidth.width(text, oldStartOfColumnIndex) : 1;
 
         // Get the number of elements in the mText array this column uses now
         int oldCharactersUsedForColumn;
@@ -208,13 +220,19 @@ public final class TerminalRow {
 
         // If MAX_COMBINING_CHARACTERS_PER_COLUMN already exist in column, then ignore adding additional combining characters.
         if (newIsCombining) {
+            if (oldCharactersUsedForColumn <= 0) return;
             int combiningCharsCount = WcWidth.zeroWidthCharsCount(mText, oldStartOfColumnIndex, oldStartOfColumnIndex + oldCharactersUsedForColumn);
             if (combiningCharsCount >= MAX_COMBINING_CHARACTERS_PER_COLUMN)
                 return;
         }
 
+        int oldNextColumnIndex = oldStartOfColumnIndex + oldCharactersUsedForColumn;
+        boolean padZwnjAfterVirama = (codePoint == 0x0CCD || codePoint == 0x094D)
+                && (oldNextColumnIndex < mSpaceUsed)
+                && WcWidth.isIndicConsonant(text[oldNextColumnIndex]);
+
         // Find how many chars this column will need
-        int newCharactersUsedForColumn = Character.charCount(codePoint);
+        int newCharactersUsedForColumn = Character.charCount(codePoint) + (padZwnjAfterVirama ? 1 : 0);
         if (newIsCombining) {
             // Combining characters are added to the contents of the column instead of overwriting them, so that they
             // modify the existing contents.
@@ -222,7 +240,6 @@ public final class TerminalRow {
             newCharactersUsedForColumn += oldCharactersUsedForColumn;
         }
 
-        int oldNextColumnIndex = oldStartOfColumnIndex + oldCharactersUsedForColumn;
         int newNextColumnIndex = oldStartOfColumnIndex + newCharactersUsedForColumn;
 
         final int javaCharDifference = newCharactersUsedForColumn - oldCharactersUsedForColumn;
@@ -245,8 +262,11 @@ public final class TerminalRow {
         mSpaceUsed += javaCharDifference;
 
         // Store char. A combining character is stored at the end of the existing contents so that it modifies them:
-        //noinspection ResultOfMethodCallIgnored - since we already now how many java chars is used.
-        Character.toChars(codePoint, text, oldStartOfColumnIndex + (newIsCombining ? oldCharactersUsedForColumn : 0));
+        int writeIndex = oldStartOfColumnIndex + (newIsCombining ? oldCharactersUsedForColumn : 0);
+        int written = Character.toChars(codePoint, text, writeIndex);
+        if (padZwnjAfterVirama) {
+            text[writeIndex + written] = 0x200C;
+        }
 
         if (oldCodePointDisplayWidth == 2 && newCodePointDisplayWidth == 1) {
             // Replace second half of wide char with a space. Which mean that we actually add a ' ' java character.
@@ -267,10 +287,12 @@ public final class TerminalRow {
             } else if (columnToSet == mColumns - 2) {
                 // Truncate the line to the second part of this wide char:
                 mSpaceUsed = newNextColumnIndex;
-            } else {
-                // Overwrite the contents of the next column, which mean we actually remove java characters. Due to the
-                // check at the beginning of this method we know that we are not overwriting a wide char.
-                int newNextNextColumnIndex = newNextColumnIndex + (Character.isHighSurrogate(mText[newNextColumnIndex]) ? 2 : 1);
+            } else if (newNextColumnIndex < mSpaceUsed) {
+                // Overwrite the contents of the next column, including any combining/conjunct characters.
+                int newNextNextColumnIndex = newNextColumnIndex + ((Character.isHighSurrogate(mText[newNextColumnIndex]) && newNextColumnIndex + 1 < mSpaceUsed) ? 2 : 1);
+                while (newNextNextColumnIndex < mSpaceUsed && isCombiningAt(newNextNextColumnIndex)) {
+                    newNextNextColumnIndex += (Character.isHighSurrogate(mText[newNextNextColumnIndex]) && newNextNextColumnIndex + 1 < mSpaceUsed) ? 2 : 1;
+                }
                 int nextLen = newNextNextColumnIndex - newNextColumnIndex;
 
                 // Shift the array leftwards.
